@@ -200,6 +200,8 @@ fun WeatherMap(location: com.hkweather.app.data.repository.LocationData) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
+    var googleMapInstance by remember { mutableStateOf<com.google.android.gms.maps.GoogleMap?>(null) }
+    var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
 
     // Observe lifecycle to forward to MapView
     DisposableEffect(lifecycleOwner) {
@@ -217,6 +219,17 @@ fun WeatherMap(location: com.hkweather.app.data.repository.LocationData) {
         }
     }
 
+    // Update marker when location changes
+    LaunchedEffect(hkLocation) {
+        googleMapInstance?.let { map ->
+            currentMarker?.remove()
+            currentMarker = map.addMarker(
+                MarkerOptions().position(hkLocation).title("Your Location")
+            )
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(hkLocation, 14f))
+        }
+    }
+
     AndroidView(
         factory = { ctx ->
             MapView(ctx).apply {
@@ -228,13 +241,14 @@ fun WeatherMap(location: com.hkweather.app.data.repository.LocationData) {
                 onCreate(null)
                 onResume()
                 getMapAsync { googleMap ->
+                    googleMapInstance = googleMap
                     googleMap.uiSettings.isZoomControlsEnabled = true
                     googleMap.uiSettings.isCompassEnabled = true
                     googleMap.uiSettings.isMyLocationButtonEnabled = true
-                    googleMap.addMarker(
+                    currentMarker = googleMap.addMarker(
                         MarkerOptions().position(hkLocation).title("Your Location")
                     )
-                    googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(hkLocation, 11f))
+                    googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(hkLocation, 14f))
                 }
             }
         },
