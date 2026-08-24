@@ -40,6 +40,7 @@ import com.google.android.gms.maps.model.MarkerOptions
 import com.hkweather.app.data.repository.CurrentWeatherDisplay
 import com.hkweather.app.data.repository.ForecastDayDisplay
 import com.hkweather.app.data.repository.StationReading
+import com.hkweather.app.data.repository.TyphoonLocation
 import com.hkweather.app.data.repository.WeatherUiState
 import com.hkweather.app.ui.viewmodel.WeatherViewModel
 
@@ -105,7 +106,17 @@ fun WeatherScreen(
                 .padding(paddingValues)
         ) {
             // Map — always fills the screen
-            WeatherMap(location = uiState.currentLocation)
+            WeatherMap(
+                location = uiState.currentLocation,
+                typhoonLocation = uiState.currentWeather?.typhoonLocation
+            )
+
+            // Thunder & Typhoon Warnings
+            uiState.currentWeather?.let { weather ->
+                if (weather.hasThunder || weather.hasTyphoon) {
+                    WarningCards(weather = weather)
+                }
+            }
 
             // Location button on map
             FloatingActionButton(
@@ -195,7 +206,10 @@ fun WeatherScreen(
 }
 
 @Composable
-fun WeatherMap(location: com.hkweather.app.data.repository.LocationData) {
+fun WeatherMap(
+    location: com.hkweather.app.data.repository.LocationData,
+    typhoonLocation: com.hkweather.app.data.repository.TyphoonLocation? = null
+) {
     val hkLocation = LatLng(location.latitude, location.longitude)
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -203,6 +217,7 @@ fun WeatherMap(location: com.hkweather.app.data.repository.LocationData) {
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
     var googleMapInstance by remember { mutableStateOf<com.google.android.gms.maps.GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
+    var typhoonMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
 
     // Observe lifecycle to forward to MapView
     DisposableEffect(lifecycleOwner) {
@@ -220,14 +235,32 @@ fun WeatherMap(location: com.hkweather.app.data.repository.LocationData) {
         }
     }
 
-    // Update marker when location changes
+    // Update markers when location changes
     LaunchedEffect(hkLocation) {
         googleMapInstance?.let { map ->
             currentMarker?.remove()
             currentMarker = map.addMarker(
                 MarkerOptions().position(hkLocation).title("Your Location")
+                    .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_AZURE))
             )
             map.animateCamera(CameraUpdateFactory.newLatLngZoom(hkLocation, 14f))
+        }
+    }
+
+    // Show typhoon on map when available
+    LaunchedEffect(typhoonLocation) {
+        googleMapInstance?.let { map ->
+            typhoonMarker?.remove()
+            typhoonLocation?.let { tc ->
+                val tcPos = LatLng(tc.latitude, tc.longitude)
+                typhoonMarker = map.addMarker(
+                    MarkerOptions().position(tcPos).title("🌀 ${tc.name}")
+                        .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_RED))
+                )
+                val bounds = com.google.android.gms.maps.model.LatLngBounds.Builder()
+                    .include(hkLocation).include(tcPos).build()
+                map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100))
+            }
         }
     }
 
@@ -250,6 +283,14 @@ fun WeatherMap(location: com.hkweather.app.data.repository.LocationData) {
                         MarkerOptions().position(hkLocation).title("Your Location")
                     )
                     googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(hkLocation, 14f))
+                    // Show typhoon if available
+                    typhoonLocation?.let { tc ->
+                        val tcPos = LatLng(tc.latitude, tc.longitude)
+                        typhoonMarker = googleMap.addMarker(
+                            MarkerOptions().position(tcPos).title("🌀 ${tc.name}")
+                                .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_RED))
+                        )
+                    }
                 }
             }
         },
@@ -412,6 +453,64 @@ fun WeatherDetailsGrid(weather: CurrentWeatherDisplay) {
     // Nearby Rainfall
     if (weather.nearbyRainfall.isNotEmpty()) {
         NearbyReadingsCard(title = "Rainfall", readings = weather.nearbyRainfall)
+    }
+}
+
+@Composable
+fun WarningCards(weather: CurrentWeatherDisplay) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            if (weather.hasThunder) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                ) {
+                    Text("⚡", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Thunderstorm Warning",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE65100)
+                        )
+                        Text(
+                            text = "Thunder expected in your area. Seek shelter indoors.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF4E342E)
+                        )
+                    }
+                }
+            }
+            if (weather.hasTyphoon) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                ) {
+                    Text("🌀", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Typhoon Warning",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFB71C1C)
+                        )
+                        Text(
+                            text = weather.tcMessage.ifBlank { "Typhoon detected. Tap map to view location." },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF4E342E)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -300,7 +300,23 @@ class WeatherRepository @Inject constructor(
             else -> windData?.direction ?: "--"
         }
 
-        val upcomingRain = if (rainfallTotal > 0) "Rain detected nearby" else "No rain expected"
+        // Thunder detection
+        val hasThunder = weather.warningMessage?.contains("thunderstorm", ignoreCase = true) == true ||
+                weather.warningMessage?.contains("lightning", ignoreCase = true) == true ||
+                forecastInfoList.any { it.forecastWeather.contains("thunder", ignoreCase = true) }
+
+        // Typhoon detection
+        val tcMessage = weather.tcMessage ?: ""
+        val hasTyphoon = tcMessage.isNotBlank()
+
+        // Typhoon location (rough estimate from warning text)
+        val typhoonLocation = extractTyphoonLocation(tcMessage)
+
+        val upcomingRain = if (rainfallTotal > 10) "Heavy rain now — seek shelter"
+                else if (rainfallTotal > 0) "Light rain nearby (${String.format("%.1f", rainfallTotal)} mm)"
+                else if (rainfallPlaces.isNotEmpty()) "Rain in surrounding areas"
+                else "No rain expected in next 30 min"
+
         val firstForecast = forecastInfoList.firstOrNull()
 
         return CurrentWeatherDisplay(
@@ -322,6 +338,10 @@ class WeatherRepository @Inject constructor(
             nearbyHumidity = hum?.data?.map { StationReading(it.place, String.format("%.1f", it.value), it.unit) } ?: emptyList(),
             nearbyWind = wind?.data?.map { StationReading(it.place ?: "--", "${String.format("%.1f", it.speed ?: 0.0)} ${it.unit ?: "km/h"}", it.direction ?: "--") } ?: emptyList(),
             nearbyRainfall = rainfall?.data?.map { StationReading(it.place, String.format("%.1f", it.max), it.unit) } ?: emptyList(),
+            hasThunder = hasThunder,
+            hasTyphoon = hasTyphoon,
+            tcMessage = tcMessage,
+            typhoonLocation = typhoonLocation,
             recordTime = temp?.recordTime ?: "",
             forecastWeather = firstForecast?.forecastWeather ?: "",
             forecastWind = firstForecast?.forecastWind ?: "",
@@ -329,6 +349,29 @@ class WeatherRepository @Inject constructor(
             upcomingRain = upcomingRain,
             airTempStations = airTemp?.data?.map { AirTempDisplay(it.place, it.value, it.unit) } ?: emptyList()
         )
+    }
+
+    /**
+     * Extract approximate typhoon coordinates from warning text.
+     * HKO typhoon warnings typically mention lat/lon.
+     */
+    private fun extractTyphoonLocation(tcMessage: String): TyphoonLocation? {
+        if (tcMessage.isBlank()) return null
+        // Try to parse coordinates from text like "near 22.5N 114.2E"
+        val regex = """(\d+\.?\d*)\s*[NnSs]\s*,?\s*(\d+\.?\d*)\s*[EeWw]""".toRegex()
+        val match = regex.find(tcMessage)
+        return if (match != null) {
+            val lat = match.groupValues[1].toDoubleOrNull() ?: return null
+            val lng = match.groupValues[2].toDoubleOrNull() ?: return null
+            TyphoonLocation(
+                latitude = if (tcMessage.contains("S", ignoreCase = true)) -lat else lat,
+                longitude = if (tcMessage.contains("W", ignoreCase = true)) -lng else lng,
+                name = "Typhoon"
+            )
+        } else {
+            // Default: use Hong Kong as fallback
+            TyphoonLocation(latitude = 22.3, longitude = 114.2, name = "Typhoon (approx)")
+        }
     }
 
     fun mapToForecastDays(forecast: HKOForecastResponse): List<ForecastDayDisplay> {
@@ -404,12 +447,22 @@ data class CurrentWeatherDisplay(
     val nearbyHumidity: List<StationReading> = emptyList(),
     val nearbyWind: List<StationReading> = emptyList(),
     val nearbyRainfall: List<StationReading> = emptyList(),
+    val hasThunder: Boolean = false,
+    val hasTyphoon: Boolean = false,
+    val tcMessage: String = "",
+    val typhoonLocation: TyphoonLocation? = null,
     val recordTime: String = "",
     val forecastWeather: String = "",
     val forecastWind: String = "",
     val generalSituation: String = "",
     val upcomingRain: String = "No rain expected",
     val airTempStations: List<AirTempDisplay> = emptyList()
+)
+
+data class TyphoonLocation(
+    val latitude: Double,
+    val longitude: Double,
+    val name: String
 )
 
 data class StationReading(val place: String, val value: String, val unit: String)
