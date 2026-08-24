@@ -39,6 +39,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.hkweather.app.data.repository.CurrentWeatherDisplay
 import com.hkweather.app.data.repository.ForecastDayDisplay
+import com.hkweather.app.data.repository.StationReading
 import com.hkweather.app.data.repository.WeatherUiState
 import com.hkweather.app.ui.viewmodel.WeatherViewModel
 
@@ -389,6 +390,54 @@ fun WeatherDetailsGrid(weather: CurrentWeatherDisplay) {
             value = weather.upcomingRain,
             modifier = Modifier.weight(1f)
         )
+    }
+    // Nearby Stations Section
+    if (weather.nearbyHumidity.isNotEmpty() || weather.nearbyWind.isNotEmpty() || weather.nearbyRainfall.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Nearby Stations",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
+    }
+    // Nearby Humidity
+    if (weather.nearbyHumidity.isNotEmpty()) {
+        NearbyReadingsCard(title = "Humidity", readings = weather.nearbyHumidity)
+    }
+    // Nearby Wind
+    if (weather.nearbyWind.isNotEmpty()) {
+        NearbyReadingsCard(title = "Wind", readings = weather.nearbyWind)
+    }
+    // Nearby Rainfall
+    if (weather.nearbyRainfall.isNotEmpty()) {
+        NearbyReadingsCard(title = "Rainfall", readings = weather.nearbyRainfall)
+    }
+}
+
+@Composable
+fun NearbyReadingsCard(title: String, readings: List<StationReading>) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(text = title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            readings.take(4).forEach { reading ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = reading.place, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text(text = "${reading.value} ${reading.unit}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 

@@ -319,6 +319,9 @@ class WeatherRepository @Inject constructor(
             rainfall = String.format("%.1f", rainfallTotal),
             rainfallUnit = rainfallUnit,
             rainfallPlaces = rainfallPlaces,
+            nearbyHumidity = hum?.data?.map { StationReading(it.place, String.format("%.1f", it.value), it.unit) } ?: emptyList(),
+            nearbyWind = wind?.data?.map { StationReading(it.place ?: "--", "${String.format("%.1f", it.speed ?: 0.0)} ${it.unit ?: "km/h"}", it.direction ?: "--") } ?: emptyList(),
+            nearbyRainfall = rainfall?.data?.map { StationReading(it.place, String.format("%.1f", it.max), it.unit) } ?: emptyList(),
             recordTime = temp?.recordTime ?: "",
             forecastWeather = firstForecast?.forecastWeather ?: "",
             forecastWind = firstForecast?.forecastWind ?: "",
@@ -398,6 +401,9 @@ data class CurrentWeatherDisplay(
     val rainfall: String = "0.0",
     val rainfallUnit: String = "mm",
     val rainfallPlaces: List<RainfallPlaceDisplay> = emptyList(),
+    val nearbyHumidity: List<StationReading> = emptyList(),
+    val nearbyWind: List<StationReading> = emptyList(),
+    val nearbyRainfall: List<StationReading> = emptyList(),
     val recordTime: String = "",
     val forecastWeather: String = "",
     val forecastWind: String = "",
@@ -406,6 +412,7 @@ data class CurrentWeatherDisplay(
     val airTempStations: List<AirTempDisplay> = emptyList()
 )
 
+data class StationReading(val place: String, val value: String, val unit: String)
 data class RainfallPlaceDisplay(val place: String, val amount: Double, val unit: String)
 data class AirTempDisplay(val place: String, val value: Double, val unit: String)
 
