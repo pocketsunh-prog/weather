@@ -272,6 +272,46 @@ class WeatherRepository @Inject constructor(
         } catch (e: Exception) { emptyList() }
     }
 
+    // ==================== Typhoon Track ====================
+
+    suspend fun fetchTyphoonTrack(): TyphoonTrack? = withContext(Dispatchers.IO) {
+        runCatching {
+            val rawJson = apiClient.getTyphoonTrack()
+            android.util.Log.d("HKWeather", "Typhoon track raw: $rawJson")
+            val json = JsonParser.parseString(rawJson).asJsonObject
+            parseTyphoonTrack(json)
+        }.getOrNull()
+    }
+
+    private fun parseTyphoonTrack(json: JsonObject): TyphoonTrack? {
+        // Try multiple field names for track data
+        val dataArray = json.getAsJsonArray("data")
+            ?: json.getAsJsonArray("track")
+            ?: json.getAsJsonArray("trackpoint")
+            ?: json.getAsJsonArray("points")
+            ?: return null
+        val name = json.get("name")?.asString
+            ?: json.get("typhoonName")?.asString
+            ?: json.get("typhoon")?.asString
+            ?: json.get("tcName")?.asString
+            ?: "Tropical Cyclone"
+        val points = dataArray.mapNotNull { el ->
+            if (el.isJsonObject) {
+                val o = el.asJsonObject
+                val lat = o.get("latitude")?.asDouble ?: o.get("lat")?.asDouble ?: return@mapNotNull null
+                val lng = o.get("longitude")?.asDouble ?: o.get("lon")?.asDouble ?: o.get("long")?.asDouble ?: return@mapNotNull null
+                TyphoonTrackPoint(
+                    latitude = lat,
+                    longitude = lng,
+                    timestamp = o.get("time")?.asString ?: o.get("timestamp")?.asString ?: o.get("datetime")?.asString ?: "",
+                    windSpeed = o.get("windSpeed")?.asInt ?: o.get("windspeed")?.asInt ?: o.get("wind")?.asInt ?: 0,
+                    category = o.get("category")?.asString ?: o.get("intensity")?.asString ?: ""
+                )
+            } else null
+        }
+        return if (points.isNotEmpty()) TyphoonTrack(name = name, points = points) else null
+    }
+
     // ==================== UI Mapping ====================
 
     fun mapToCurrentWeatherDisplay(weather: HKOWeatherResponse): CurrentWeatherDisplay {
@@ -303,14 +343,26 @@ class WeatherRepository @Inject constructor(
         // Thunder detection
         val hasThunder = weather.warningMessage?.contains("thunderstorm", ignoreCase = true) == true ||
                 weather.warningMessage?.contains("lightning", ignoreCase = true) == true ||
+                weather.warningMessage?.contains("thunder", ignoreCase = true) == true ||
                 forecastInfoList.any { it.forecastWeather.contains("thunder", ignoreCase = true) }
 
-        // Typhoon detection
+        // Typhoon detection — check multiple sources
         val tcMessage = weather.tcMessage ?: ""
-        val hasTyphoon = tcMessage.isNotBlank()
+        val warningTyphoonText = weather.warningMessage ?: ""
+        val hasTyphoon = tcMessage.isNotBlank() ||
+                warningTyphoonText.contains("typhoon", ignoreCase = true) ||
+                warningTyphoonText.contains("tropical cyclone", ignoreCase = true) ||
+                warningTyphoonText.contains("Signal No.", ignoreCase = true)
+
+        // Build typhoon message from available sources
+        val typhoonDisplayMessage = when {
+            tcMessage.isNotBlank() -> tcMessage
+            warningTyphoonText.contains("typhoon", ignoreCase = true) -> warningTyphoonText
+            else -> ""
+        }
 
         // Typhoon location (rough estimate from warning text)
-        val typhoonLocation = extractTyphoonLocation(tcMessage)
+        val typhoonLocation = extractTyphoonLocation(typhoonDisplayMessage)
 
         val upcomingRain = if (rainfallTotal > 10) "Heavy rain now — seek shelter"
                 else if (rainfallTotal > 0) "Light rain nearby (${String.format("%.1f", rainfallTotal)} mm)"
@@ -340,7 +392,8 @@ class WeatherRepository @Inject constructor(
             nearbyRainfall = rainfall?.data?.map { StationReading(it.place, String.format("%.1f", it.max), it.unit) } ?: emptyList(),
             hasThunder = hasThunder,
             hasTyphoon = hasTyphoon,
-            tcMessage = tcMessage,
+            tcMessage = typhoonDisplayMessage,
+            rawWarningMessage = weather.warningMessage ?: "",
             typhoonLocation = typhoonLocation,
             recordTime = temp?.recordTime ?: "",
             forecastWeather = firstForecast?.forecastWeather ?: "",
@@ -425,7 +478,10 @@ data class WeatherUiState(
     val currentWeather: CurrentWeatherDisplay? = null,
     val forecast: List<ForecastDayDisplay> = emptyList(),
     val warnings: List<String> = emptyList(),
-    val currentLocation: LocationData = LocationData()
+    val currentLocation: LocationData = LocationData(),
+    val typhoonTrack: TyphoonTrack? = null,
+    val showTyphoonScreen: Boolean = false,
+    val typhoonSignal: String = ""
 )
 
 data class CurrentWeatherDisplay(
@@ -450,7 +506,9 @@ data class CurrentWeatherDisplay(
     val hasThunder: Boolean = false,
     val hasTyphoon: Boolean = false,
     val tcMessage: String = "",
+    val rawWarningMessage: String = "",
     val typhoonLocation: TyphoonLocation? = null,
+    val typhoonTrack: TyphoonTrack? = null,
     val recordTime: String = "",
     val forecastWeather: String = "",
     val forecastWind: String = "",
@@ -463,6 +521,19 @@ data class TyphoonLocation(
     val latitude: Double,
     val longitude: Double,
     val name: String
+)
+
+data class TyphoonTrack(
+    val name: String,
+    val points: List<TyphoonTrackPoint>
+)
+
+data class TyphoonTrackPoint(
+    val latitude: Double,
+    val longitude: Double,
+    val timestamp: String,
+    val windSpeed: Int = 0,
+    val category: String = ""
 )
 
 data class StationReading(val place: String, val value: String, val unit: String)

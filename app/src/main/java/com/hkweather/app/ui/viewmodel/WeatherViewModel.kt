@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.gson.JsonElement
 import com.hkweather.app.data.local.LocationRepository
 import com.hkweather.app.data.model.*
 import com.hkweather.app.data.repository.LocationData
@@ -44,13 +45,15 @@ class WeatherViewModel @Inject constructor(
                     val forecastDays = repository.mapToForecastDays(forecast)
                     val warningList = repository.mapToWarnings(warnings)
                     val rainPrediction = repository.mapToRainPrediction(weather)
+                    val typhoonSignal = extractTyphoonSignal(warnings, weather)
 
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             currentWeather = display.copy(upcomingRain = rainPrediction),
                             forecast = forecastDays,
-                            warnings = warningList
+                            warnings = warningList,
+                            typhoonSignal = typhoonSignal
                         )
                     }
                 }
@@ -133,5 +136,60 @@ class WeatherViewModel @Inject constructor(
             getCurrentLocation()
             loadWeatherData()
         }
+    }
+
+    fun showTyphoonTrack() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, showTyphoonScreen = true) }
+            val track = repository.fetchTyphoonTrack()
+            android.util.Log.d("HKWeather", "Typhoon track: ${track?.name}, points: ${track?.points?.size}")
+            _uiState.update { state ->
+                state.copy(
+                    isLoading = false,
+                    typhoonTrack = track,
+                    currentWeather = state.currentWeather?.copy(
+                        tcMessage = if (track != null) "Track loaded: ${track.points.size} points" else "No track data available"
+                    )
+                )
+            }
+        }
+    }
+
+    fun hideTyphoonScreen() {
+        _uiState.update { it.copy(showTyphoonScreen = false) }
+    }
+
+    private fun extractTyphoonSignal(warnings: com.hkweather.app.data.model.HKOWarningResponse, weather: com.hkweather.app.data.model.HKOWeatherResponse): String {
+        // Check warning statement code for typhoon signals (TC1, TC3, TC8, TC9, TC10)
+        val code = warnings.warningStatementCode ?: ""
+        if (code.startsWith("TC", ignoreCase = true)) {
+            return "Typhoon $code in force"
+        }
+
+        // Check warning contents for signal info
+        val warningContents = warnings.contents
+        if (warningContents != null && !warningContents.isJsonNull && warningContents.isJsonArray) {
+            for (el in warningContents.asJsonArray) {
+                val text = el.asString
+                if (text.contains("Signal", ignoreCase = true)) {
+                    return text
+                }
+            }
+        }
+
+        // Check warning message for typhoon signals
+        val warningMsg = weather.warningMessage ?: ""
+        val signalRegex = """Signal\s*(No\.?\s*)?(\d+)""".toRegex(RegexOption.IGNORE_CASE)
+        val match = signalRegex.find(warningMsg)
+        if (match != null) {
+            val signalNum = match.groupValues[2]
+            return "Typhoon Signal No. $signalNum in force"
+        }
+
+        // Check tcMessage
+        val tcMsg = weather.tcMessage ?: ""
+        if (tcMsg.isNotBlank()) return tcMsg
+
+        return ""
     }
 }
