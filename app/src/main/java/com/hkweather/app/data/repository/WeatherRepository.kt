@@ -136,15 +136,36 @@ class WeatherRepository @Inject constructor(
     }
 
     private fun parseWind(element: JsonElement?): Wind? {
-        if (element == null || element.isJsonNull || !element.isJsonObject) return null
+        if (element == null || element.isJsonNull || !element.isJsonObject) {
+            android.util.Log.d("HKWeather", "Wind: element is null/not object: ${element?.javaClass?.simpleName}, isNull=${element == null}, isJsonNull=${element?.isJsonNull}, isObject=${element?.isJsonObject}")
+            return null
+        }
         return try {
             val o = element.asJsonObject
-            val arr = o.getAsJsonArray("data") ?: return null
+            val arr = o.getAsJsonArray("data")
+            android.util.Log.d("HKWeather", "Wind: data array found: ${arr != null}, size: ${arr?.size()}, allKeys: ${o.keySet()}")
+            if (arr == null) return null
+            // Debug: log raw wind data
+            android.util.Log.d("HKWeather", "Wind raw: ${o.toString()}")
             Wind(
                 data = arr.mapNotNull { el ->
                     if (el.isJsonObject) {
                         val d = el.asJsonObject
-                        WindData(speed = d.get("speed")?.asDouble, direction = d.get("direction")?.asString, place = d.get("place")?.asString, unit = d.get("unit")?.asString ?: "km/h")
+                        // Try multiple field names for speed
+                        val speed = d.get("speed")?.asDouble
+                            ?: d.get("windspeed")?.asDouble
+                            ?: d.get("windSpeed")?.asDouble
+                            ?: d.get("speed")?.asString?.toDoubleOrNull()
+                            ?: d.get("windspeed")?.asString?.toDoubleOrNull()
+                        val direction = d.get("direction")?.asString
+                            ?: d.get("windDirection")?.asString
+                            ?: d.get("dir")?.asString
+                        val place = d.get("place")?.asString
+                            ?: d.get("station")?.asString
+                            ?: d.get("location")?.asString
+                        val unit = d.get("unit")?.asString ?: "km/h"
+                        android.util.Log.d("HKWeather", "Wind parsed: speed=$speed, dir=$direction, place=$place")
+                        WindData(speed = speed, direction = direction, place = place, unit = unit)
                     } else null
                 },
                 recordTime = o.get("recordTime")?.asString ?: ""
@@ -272,44 +293,37 @@ class WeatherRepository @Inject constructor(
         } catch (e: Exception) { emptyList() }
     }
 
-    // ==================== Typhoon Track ====================
 
-    suspend fun fetchTyphoonTrack(): TyphoonTrack? = withContext(Dispatchers.IO) {
-        runCatching {
-            val rawJson = apiClient.getTyphoonTrack()
-            android.util.Log.d("HKWeather", "Typhoon track raw: $rawJson")
-            val json = JsonParser.parseString(rawJson).asJsonObject
-            parseTyphoonTrack(json)
-        }.getOrNull()
-    }
+    // ==================== Typhoon Info from Warnings ====================
 
-    private fun parseTyphoonTrack(json: JsonObject): TyphoonTrack? {
-        // Try multiple field names for track data
-        val dataArray = json.getAsJsonArray("data")
-            ?: json.getAsJsonArray("track")
-            ?: json.getAsJsonArray("trackpoint")
-            ?: json.getAsJsonArray("points")
-            ?: return null
-        val name = json.get("name")?.asString
-            ?: json.get("typhoonName")?.asString
-            ?: json.get("typhoon")?.asString
-            ?: json.get("tcName")?.asString
-            ?: "Tropical Cyclone"
-        val points = dataArray.mapNotNull { el ->
-            if (el.isJsonObject) {
-                val o = el.asJsonObject
-                val lat = o.get("latitude")?.asDouble ?: o.get("lat")?.asDouble ?: return@mapNotNull null
-                val lng = o.get("longitude")?.asDouble ?: o.get("lon")?.asDouble ?: o.get("long")?.asDouble ?: return@mapNotNull null
+    /**
+     * Extract typhoon track info from warning data since HKO doesn't have a tctrack API.
+     * Returns null if no typhoon warning is active.
+     */
+    fun extractTyphoonFromWarnings(warnings: HKOWarningResponse, weather: HKOWeatherResponse): TyphoonTrack? {
+        // Check if there's a typhoon warning
+        val hasTyphoon = weather.tcMessage?.isNotBlank() == true ||
+                weather.warningMessage?.contains("typhoon", ignoreCase = true) == true ||
+                weather.warningMessage?.contains("Signal", ignoreCase = true) == true ||
+                warnings.warningStatementCode?.startsWith("TC") == true
+
+        if (!hasTyphoon) return null
+
+        // Build a simple track from the warning info
+        val name = weather.tcMessage?.take(50) ?: "Tropical Cyclone"
+        // Return a single-point "track" with Hong Kong as reference
+        return TyphoonTrack(
+            name = name,
+            points = listOf(
                 TyphoonTrackPoint(
-                    latitude = lat,
-                    longitude = lng,
-                    timestamp = o.get("time")?.asString ?: o.get("timestamp")?.asString ?: o.get("datetime")?.asString ?: "",
-                    windSpeed = o.get("windSpeed")?.asInt ?: o.get("windspeed")?.asInt ?: o.get("wind")?.asInt ?: 0,
-                    category = o.get("category")?.asString ?: o.get("intensity")?.asString ?: ""
+                    latitude = 22.3,
+                    longitude = 114.2,
+                    timestamp = weather.warningMessage ?: "Active",
+                    windSpeed = 0,
+                    category = warnings.warningStatementCode ?: ""
                 )
-            } else null
-        }
-        return if (points.isNotEmpty()) TyphoonTrack(name = name, points = points) else null
+            )
+        )
     }
 
     // ==================== UI Mapping ====================
@@ -319,6 +333,8 @@ class WeatherRepository @Inject constructor(
         val uv = parseUVIndex(weather.uvIndex)
         val temp = parseTemperature(weather.temperature)
         val hum = parseHumidity(weather.humidity)
+        // Debug: log raw wind element
+        android.util.Log.d("HKWeather", "Wind element: ${weather.wind?.toString()?.take(200)}")
         val wind = parseWind(weather.wind)
         val rainfall = parseRainfall(weather.rainfall)
         val airTemp = parseAirTemp(weather.airTemp)
@@ -331,6 +347,9 @@ class WeatherRepository @Inject constructor(
         val rainfallPlaces = rainfall?.data?.filter { it.max > 0 }?.map { RainfallPlaceDisplay(it.place, it.max, it.unit) } ?: emptyList()
         val rainfallTotal = rainfall?.max ?: 0.0
         val rainfallUnit = rainfall?.data?.firstOrNull()?.unit ?: "mm"
+
+        // Debug wind data
+        android.util.Log.d("HKWeather", "Wind data count: ${wind?.data?.size}, first: speed=${windData?.speed}, dir=${windData?.direction}, unit=${windData?.unit}")
 
         val windDir = when (windData?.direction?.lowercase()) {
             "n" -> "North"; "nne" -> "NNE"; "ne" -> "NE"; "ene" -> "ENE"

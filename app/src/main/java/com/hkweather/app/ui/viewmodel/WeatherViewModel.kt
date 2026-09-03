@@ -46,6 +46,7 @@ class WeatherViewModel @Inject constructor(
                     val warningList = repository.mapToWarnings(warnings)
                     val rainPrediction = repository.mapToRainPrediction(weather)
                     val typhoonSignal = extractTyphoonSignal(warnings, weather)
+                    val typhoonTrack = repository.extractTyphoonFromWarnings(warnings, weather)
 
                     _uiState.update {
                         it.copy(
@@ -53,7 +54,8 @@ class WeatherViewModel @Inject constructor(
                             currentWeather = display.copy(upcomingRain = rainPrediction),
                             forecast = forecastDays,
                             warnings = warningList,
-                            typhoonSignal = typhoonSignal
+                            typhoonSignal = typhoonSignal,
+                            typhoonTrack = typhoonTrack
                         )
                     }
                 }
@@ -139,20 +141,7 @@ class WeatherViewModel @Inject constructor(
     }
 
     fun showTyphoonTrack() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, showTyphoonScreen = true) }
-            val track = repository.fetchTyphoonTrack()
-            android.util.Log.d("HKWeather", "Typhoon track: ${track?.name}, points: ${track?.points?.size}")
-            _uiState.update { state ->
-                state.copy(
-                    isLoading = false,
-                    typhoonTrack = track,
-                    currentWeather = state.currentWeather?.copy(
-                        tcMessage = if (track != null) "Track loaded: ${track.points.size} points" else "No track data available"
-                    )
-                )
-            }
-        }
+        _uiState.update { it.copy(showTyphoonScreen = true) }
     }
 
     fun hideTyphoonScreen() {

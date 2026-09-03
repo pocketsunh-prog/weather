@@ -19,7 +19,6 @@ class HkoApiClient(
     suspend fun getForecast(): String = fetch("weather.php?dataType=fnd&lang=en")
     suspend fun getWarningInfo(): String = fetch("weather.php?dataType=warningInfo&lang=en")
     suspend fun getRainfall(): String = fetch("weather.php?dataType=rainfall&lang=en")
-    suspend fun getTyphoonTrack(): String = fetch("weather.php?dataType=tctrack&lang=en")
 
     private suspend fun fetch(endpoint: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder()
