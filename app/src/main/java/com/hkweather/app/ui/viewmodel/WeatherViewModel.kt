@@ -167,17 +167,27 @@ class WeatherViewModel @Inject constructor(
         }
 
         // Check warning message for typhoon signals
-        val warningMsg = weather.warningMessage ?: ""
+        val warningMsg = weather.warningMessage
+        val warningText = if (warningMsg?.isJsonArray == true) {
+            warningMsg.asJsonArray.mapNotNull { it.asString }.joinToString(" ")
+        } else {
+            warningMsg?.asString ?: ""
+        }
         val signalRegex = """Signal\s*(No\.?\s*)?(\d+)""".toRegex(RegexOption.IGNORE_CASE)
-        val match = signalRegex.find(warningMsg)
+        val match = signalRegex.find(warningText)
         if (match != null) {
             val signalNum = match.groupValues[2]
             return "Typhoon Signal No. $signalNum in force"
         }
 
         // Check tcMessage
-        val tcMsg = weather.tcMessage ?: ""
-        if (tcMsg.isNotBlank()) return tcMsg
+        val tcMsg = weather.tcMessage
+        val tcText = if (tcMsg?.isJsonArray == true) {
+            tcMsg.asJsonArray.mapNotNull { it.asString }.joinToString(" ")
+        } else {
+            tcMsg?.asString ?: ""
+        }
+        if (tcText.isNotBlank()) return tcText
 
         return ""
     }

@@ -58,7 +58,8 @@ class WeatherRepository @Inject constructor(
             icon = json.get("icon"),
             uvIndex = json.get("uvindex"),
             rainfall = json.get("rainfall"),
-            warningMessage = json.get("warningMessage")?.asString,
+            warningMessage = json.get("warningMessage"),
+            tcMessage = json.get("tcmessage"),
             temperature = json.get("temperature"),
             humidity = json.get("humidity"),
             wind = json.get("wind"),
@@ -171,6 +172,34 @@ class WeatherRepository @Inject constructor(
                 recordTime = o.get("recordTime")?.asString ?: ""
             )
         } catch (e: Exception) { null }
+    }
+
+    /**
+     * Extract text from a JSON array field (warningMessage, tcmessage are arrays).
+     */
+    private fun extractTextFromArray(element: JsonElement?): String {
+        if (element == null || element.isJsonNull) return ""
+        return try {
+            if (element.isJsonArray) {
+                element.asJsonArray.mapNotNull { it.asString }.joinToString(" ")
+            } else {
+                element.asString
+            }
+        } catch (e: Exception) { "" }
+    }
+
+    /**
+     * Extract list of text from a JSON array field.
+     */
+    private fun extractListFromArray(element: JsonElement?): List<String> {
+        if (element == null || element.isJsonNull) return emptyList()
+        return try {
+            if (element.isJsonArray) {
+                element.asJsonArray.mapNotNull { it.asString }
+            } else {
+                listOf(element.asString)
+            }
+        } catch (e: Exception) { emptyList() }
     }
 
     private fun parseRainfall(element: JsonElement?): Rainfall? {
@@ -301,24 +330,31 @@ class WeatherRepository @Inject constructor(
      * Returns null if no typhoon warning is active.
      */
     fun extractTyphoonFromWarnings(warnings: HKOWarningResponse, weather: HKOWeatherResponse): TyphoonTrack? {
+        // Extract text from JSON arrays
+        val tcText = extractTextFromArray(weather.tcMessage)
+        val warningText = extractTextFromArray(weather.warningMessage)
+
         // Check if there's a typhoon warning
-        val hasTyphoon = weather.tcMessage?.isNotBlank() == true ||
-                weather.warningMessage?.contains("typhoon", ignoreCase = true) == true ||
-                weather.warningMessage?.contains("Signal", ignoreCase = true) == true ||
+        val hasTyphoon = tcText.isNotBlank() ||
+                warningText.contains("typhoon", ignoreCase = true) ||
+                warningText.contains("Signal", ignoreCase = true) ||
                 warnings.warningStatementCode?.startsWith("TC") == true
 
         if (!hasTyphoon) return null
 
-        // Build a simple track from the warning info
-        val name = weather.tcMessage?.take(50) ?: "Tropical Cyclone"
-        // Return a single-point "track" with Hong Kong as reference
+        // Parse location from tcMessage (e.g., "24.4 degrees north, 115.4 degrees east")
+        val lat = Regex("""(\d+\.?\d*)\s*degrees?\s*north""").find(tcText)?.groupValues?.get(1)?.toDoubleOrNull() ?: 22.3
+        val lng = Regex("""(\d+\.?\d*)\s*degrees?\s*east""").find(tcText)?.groupValues?.get(1)?.toDoubleOrNull() ?: 114.2
+
+        // Build a track from the warning info
+        val name = tcText.take(50).ifBlank { "Tropical Cyclone" }
         return TyphoonTrack(
             name = name,
             points = listOf(
                 TyphoonTrackPoint(
-                    latitude = 22.3,
-                    longitude = 114.2,
-                    timestamp = weather.warningMessage ?: "Active",
+                    latitude = lat,
+                    longitude = lng,
+                    timestamp = warningText.ifBlank { "Active" },
                     windSpeed = 0,
                     category = warnings.warningStatementCode ?: ""
                 )
@@ -360,23 +396,24 @@ class WeatherRepository @Inject constructor(
         }
 
         // Thunder detection
-        val hasThunder = weather.warningMessage?.contains("thunderstorm", ignoreCase = true) == true ||
-                weather.warningMessage?.contains("lightning", ignoreCase = true) == true ||
-                weather.warningMessage?.contains("thunder", ignoreCase = true) == true ||
+        val warningText = extractTextFromArray(weather.warningMessage)
+        val hasThunder = warningText.contains("thunderstorm", ignoreCase = true) ||
+                warningText.contains("lightning", ignoreCase = true) ||
+                warningText.contains("thunder", ignoreCase = true) ||
                 forecastInfoList.any { it.forecastWeather.contains("thunder", ignoreCase = true) }
 
         // Typhoon detection — check multiple sources
-        val tcMessage = weather.tcMessage ?: ""
-        val warningTyphoonText = weather.warningMessage ?: ""
+        val tcMessage = extractTextFromArray(weather.tcMessage)
         val hasTyphoon = tcMessage.isNotBlank() ||
-                warningTyphoonText.contains("typhoon", ignoreCase = true) ||
-                warningTyphoonText.contains("tropical cyclone", ignoreCase = true) ||
-                warningTyphoonText.contains("Signal No.", ignoreCase = true)
+                warningText.contains("typhoon", ignoreCase = true) ||
+                warningText.contains("tropical cyclone", ignoreCase = true) ||
+                warningText.contains("Signal No.", ignoreCase = true) ||
+                warningText.contains("Signal", ignoreCase = true)
 
         // Build typhoon message from available sources
         val typhoonDisplayMessage = when {
             tcMessage.isNotBlank() -> tcMessage
-            warningTyphoonText.contains("typhoon", ignoreCase = true) -> warningTyphoonText
+            warningText.contains("typhoon", ignoreCase = true) -> warningText
             else -> ""
         }
 
@@ -412,7 +449,7 @@ class WeatherRepository @Inject constructor(
             hasThunder = hasThunder,
             hasTyphoon = hasTyphoon,
             tcMessage = typhoonDisplayMessage,
-            rawWarningMessage = weather.warningMessage ?: "",
+            rawWarningMessage = warningText,
             typhoonLocation = typhoonLocation,
             recordTime = temp?.recordTime ?: "",
             forecastWeather = firstForecast?.forecastWeather ?: "",
