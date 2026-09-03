@@ -730,248 +730,287 @@ fun TyphoonTrackScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
 
-    var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
-    var googleMapInstance by remember { mutableStateOf<com.google.android.gms.maps.GoogleMap?>(null) }
-    var trackPolyline by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
-    var trackMarkers = remember { mutableStateOf<List<com.google.android.gms.maps.model.Marker>>(emptyList()) }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> mapViewInstance?.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapViewInstance?.onPause()
-                Lifecycle.Event.ON_DESTROY -> mapViewInstance?.onDestroy()
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    // Draw track when available
-    LaunchedEffect(track) {
-        googleMapInstance?.let { map ->
-            trackPolyline?.remove()
-            trackMarkers.value.forEach { it.remove() }
-            trackMarkers.value = emptyList()
-
-            track?.let { tc ->
-                if (tc.points.isNotEmpty()) {
-                    val trackPoints = tc.points.map { LatLng(it.latitude, it.longitude) }
-                    val polylineOptions = com.google.android.gms.maps.model.PolylineOptions()
-                        .addAll(trackPoints)
-                        .color(android.graphics.Color.RED)
-                        .width(6f)
-                        .geodesic(true)
-                    trackPolyline = map.addPolyline(polylineOptions)
-
-                    val newMarkers = tc.points.mapIndexed { index, point ->
-                        map.addMarker(
-                            MarkerOptions()
-                                .position(LatLng(point.latitude, point.longitude))
-                                .title("${tc.name}\n${point.timestamp}\nWind: ${point.windSpeed} km/h")
-                                .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
-                                    if (index == tc.points.size - 1) com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_RED
-                                    else com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ORANGE
-                                ))
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = track?.name ?: "Tropical Cyclone Track",
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
-                    trackMarkers.value = newMarkers.filterNotNull()
-
-                    val boundsBuilder = com.google.android.gms.maps.model.LatLngBounds.Builder()
-                    trackPoints.forEach { boundsBuilder.include(it) }
-                    boundsBuilder.include(LatLng(userLocation.latitude, userLocation.longitude))
-                    map.animateCamera(CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 100))
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Signal info
+            if (typhoonSignal.isNotBlank()) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("🌀", fontSize = 32.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = typhoonSignal,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFE65100)
+                            )
+                        }
+                    }
                 }
             }
-        }
-    }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Full-screen map
-        AndroidView(
-            factory = { ctx ->
-                MapView(ctx).apply {
-                    layoutParams = android.view.ViewGroup.LayoutParams(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    mapViewInstance = this
-                    onCreate(null)
-                    onResume()
-                    getMapAsync { googleMap ->
-                        googleMapInstance = googleMap
-                        googleMap.uiSettings.isZoomControlsEnabled = true
-                        googleMap.uiSettings.isCompassEnabled = true
-                        googleMap.uiSettings.isMyLocationButtonEnabled = true
-
-                        // Add user location marker
-                        googleMap.addMarker(
-                            MarkerOptions()
-                                .position(LatLng(userLocation.latitude, userLocation.longitude))
-                                .title("Your Location")
-                                .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_AZURE))
-                        )
-
-                        // Draw track if available
-                        track?.let { tc ->
-                            if (tc.points.isNotEmpty()) {
-                                val trackPoints = tc.points.map { LatLng(it.latitude, it.longitude) }
-                                val polylineOptions = com.google.android.gms.maps.model.PolylineOptions()
-                                    .addAll(trackPoints)
-                                    .color(android.graphics.Color.RED)
-                                    .width(6f)
-                                    .geodesic(true)
-                                trackPolyline = googleMap.addPolyline(polylineOptions)
-
-                                val newMarkers = tc.points.mapIndexed { index, point ->
-                                    googleMap.addMarker(
-                                        MarkerOptions()
-                                            .position(LatLng(point.latitude, point.longitude))
-                                            .title("${tc.name}\n${point.timestamp}\nWind: ${point.windSpeed} km/h")
-                                            .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
-                                                if (index == tc.points.size - 1) com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_RED
-                                                else com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ORANGE
-                                            ))
-                                    )
+            // HKO Typhoon GIS Image
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Typhoon Track (HKO GIS)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            IconButton(
+                                onClick = { /* WebView reload handled below */ },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        AndroidView(
+                            factory = { ctx ->
+                                android.webkit.WebView(ctx).apply {
+                                    settings.javaScriptEnabled = true
+                                    settings.loadWithOverviewMode = true
+                                    settings.useWideViewPort = true
+                                    settings.builtInZoomControls = true
+                                    settings.displayZoomControls = false
+                                    settings.domStorageEnabled = true
+                                    webViewClient = object : android.webkit.WebViewClient() {
+                                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                            view?.scrollTo(0, 200)
+                                        }
+                                    }
+                                    loadUrl("https://www.hko.gov.hk/tc/wxinfo/currwx/tc_gis.htm")
                                 }
-                                trackMarkers.value = newMarkers.filterNotNull()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(400.dp)
+                        )
+                    }
+                }
+            }
 
-                                val boundsBuilder = com.google.android.gms.maps.model.LatLngBounds.Builder()
-                                trackPoints.forEach { boundsBuilder.include(it) }
-                                boundsBuilder.include(LatLng(userLocation.latitude, userLocation.longitude))
-                                googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 100))
+            // Track points
+            track?.let { tc ->
+                item {
+                    Text(
+                        text = "Track Points (" + tc.points.size + ")",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            tc.points.forEachIndexed { index, point ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (index == tc.points.size - 1) "🔴" else "🟠",
+                                        fontSize = 16.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Lat: " + point.latitude + "\u00b0N, Lng: " + point.longitude + "\u00b0E",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (point.timestamp.isNotBlank()) {
+                                            Text(
+                                                text = point.timestamp,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "${point.windSpeed} km/h",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFD32F2F)
+                                        )
+                                        if (point.category.isNotBlank()) {
+                                            Text(
+                                                text = point.category,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                                if (index < tc.points.size - 1) {
+                                    Divider(modifier = Modifier.padding(vertical = 2.dp))
+                                }
                             }
                         }
                     }
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
 
-        // Top bar with back button
-        TopAppBar(
-            title = {
-                Text(
-                    text = track?.name ?: "Tropical Cyclone Track",
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            },
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.Default.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            )
-        )
+                // Distance from user
+                if (tc.points.isNotEmpty()) {
+                    val latest = tc.points.last()
+                    val dist = calculateDistance(userLocation.latitude, userLocation.longitude, latest.latitude, latest.longitude)
+                    val bearing = calculateBearing(userLocation.latitude, userLocation.longitude, latest.latitude, latest.longitude)
+                    val direction = getDirectionFromBearing(bearing)
 
-        // Track info panel at bottom
-        track?.let { tc ->
-            Card(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = tc.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Track Points: ${tc.points.size}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (tc.points.isNotEmpty()) {
-                        val latest = tc.points.last()
-                        Text(
-                            text = "Latest: ${latest.latitude}°N, ${latest.longitude}°E",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = "Wind Speed: ${latest.windSpeed} km/h",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        if (latest.category.isNotBlank()) {
-                            Text(
-                                text = "Category: ${latest.category}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "📍 Distance from You",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "$dist km $direction",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Your location: " + String.format("%.4f", userLocation.latitude) + "\u00b0N, " + String.format("%.4f", userLocation.longitude) + "\u00b0E",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = onBack,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Back to Weather")
                     }
                 }
             }
-        }
 
-        // No track data - show typhoon signal if available
-        if (track == null) {
-            Card(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(32.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (typhoonSignal.isNotBlank()) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.errorContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+            // No track data
+            if (track == null && typhoonSignal.isBlank()) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "No Typhoon Data",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No active tropical cyclone track available.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Back button
+            item {
+                Button(
+                    onClick = onBack,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (typhoonSignal.isNotBlank()) {
-                        Text("🌀", fontSize = 48.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Typhoon Signal Active",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE65100)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = typhoonSignal,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFF4E342E),
-                            textAlign = TextAlign.Center
-                        )
-                    } else {
-                        Text(
-                            text = "No Typhoon Track Data",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No active tropical cyclone track available.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onBack) {
-                        Text("Back")
-                    }
+                    Text("Back to Weather")
                 }
             }
         }
     }
+}
+/**
+ * Calculate distance between two coordinates in km using Haversine formula.
+ */
+fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Int {
+    val r = 6371 // Earth radius in km
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return (r * c).toInt()
+}
+
+/**
+ * Calculate bearing from point 1 to point 2 in degrees.
+ */
+fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Int {
+    val dLon = Math.toRadians(lon2 - lon1)
+    val y = Math.sin(dLon) * Math.cos(Math.toRadians(lat2))
+    val x = Math.cos(Math.toRadians(lat1)) * Math.sin(Math.toRadians(lat2)) -
+            Math.sin(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.cos(dLon)
+    val bearing = Math.toDegrees(Math.atan2(y, x))
+    return ((bearing + 360) % 360).toInt()
+}
+
+/**
+ * Convert bearing to compass direction.
+ */
+fun getDirectionFromBearing(bearing: Int): String {
+    val directions = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    val index = ((bearing + 22.5) / 45).toInt() % 8
+    return directions[index]
 }
